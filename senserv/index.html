@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+ <title>My First Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<head>
+
+</head>
+
+<body>
+
+<div class="row">
+  <div class="col-md-12">
+      <div id="bargraph">
+          <script>
+              var graphs = {{plot | safe}};
+              Plotly.plot('bargraph',graphs,{});
+          </script>
+      </div>
+  </div>
+</div>
+</body>
+
+</html>
