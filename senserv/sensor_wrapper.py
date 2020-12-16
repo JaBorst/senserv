@@ -51,3 +51,14 @@ class SensorList:
 
 
 
+class TestSensor:
+    def __init__(self):
+        self.temperature = 40
+        self.pressure = 1000
+class TestSensor2:
+    def __init__(self):
+        self.temperature = 20
+        self.humidity = 234
+
+test_list_sensors= SensorWrapper(TestSensor(), ["temperature", "pressure"]),  SensorWrapper(TestSensor2(), ["temperature","humidity"])
+test_sensors= SensorWrapper(TestSensor(), ["temperature", "pressure"]),  SensorWrapper(TestSensor2(), ["temperature","humidity"])
