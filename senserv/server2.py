@@ -59,4 +59,4 @@ app.layout = get_layout
 if __name__ == '__main__':
     daemonLoop = multiprocessing.Process(name='Daemon', target=sl.run)
     daemonLoop.start()
-    app.run_server(debug=True)
+    app.run_server(debug=True, host='0.0.0.0')
