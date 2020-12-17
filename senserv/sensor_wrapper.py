@@ -1,8 +1,9 @@
 import pathlib
 from datetime import datetime
 import time
-
-
+import sqlite3
+import multiprocessing
+import pandas as pd
 
 class SensorWrapper():
     def __init__(self, sensor, measure:list):
@@ -10,46 +11,6 @@ class SensorWrapper():
         self.measure=measure
     def get(self):
         return {k:self.sensor.__dict__[k]  for k in self.measure}
-
-
-def timestamp():
-    # return datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-    return datetime.now().isoformat()
-
-class SensorList:
-    def __init__(self, sensors, log=None, interval=10):
-        self.sensors = sensors
-        self.interval=interval
-        self._keys = sorted(list(set(sum([x.measure for x in self.sensors], []))))
-        self._separator = "\t"
-
-        log = log if log is not None else f"{timestamp()}_measurement.log"
-        self._log_file = log if isinstance(log, pathlib.Path) else pathlib.Path(log)
-        if not self._log_file.exists():
-            with open(self._log_file, "w") as f:
-                f.write(self._separator.join(["timestamp"] + self._keys) +"\n")
-
-    def all(self):
-        results = [s.get() for s in self.sensors]
-        d = {k:[] for k in self._keys}
-        for k in self._keys:
-            for r in results:
-                if k in r :
-                    d[k].append(r[k])
-        return d
-
-    def log(self):
-        r = self.all()
-        with open (self._log_file, "a") as f:
-            f.write(self._separator.join([timestamp()] + [str(r[k]) for k in self._keys]) + "\n")
-        return r
-
-    def run(self):
-        while True:
-            print(self.log())
-            time.sleep(self.interval)
-
-
 
 class TestSensor:
     def __init__(self):
@@ -60,5 +21,124 @@ class TestSensor2:
         self.temperature = 20
         self.humidity = 234
 
-test_list_sensors= SensorWrapper(TestSensor(), ["temperature", "pressure"]),  SensorWrapper(TestSensor2(), ["temperature","humidity"])
-test_sensors= SensorWrapper(TestSensor(), ["temperature", "pressure"]),  SensorWrapper(TestSensor2(), ["temperature","humidity"])
+
+
+class AHT():
+    def __init__(self, s):
+        self.s = s
+        self.measure = ["temperature", "relative_humidity"]
+
+    def get(self):
+        return {
+            "temperature": self.s.temperature,
+            "relative_humidity": self.s.relative_humidity
+        }
+
+class BMP():
+    def __init__(self,s):
+        self.s = s
+        self.measure =  ["pressure", "altitude", "temperature"]
+    def get(self):
+        return{
+            "pressure": self.s.pressure,
+            "altitude": self.s.altitude,
+            # "temperature":self.s.temperature
+        }
+
+def timestamp():
+    return datetime.now().isoformat()
+
+class Store():
+    def __init__(self, keys, db=None, location=None, permanent=True):
+
+        self._keys = keys
+        if db is None:
+            self.db=pathlib.Path("senserv_db.sqlite")
+        else:
+            self.db = pathlib.Path(db)
+
+        if location is None:
+            self.location = "current_location"
+        else:
+            self.location = location
+        self._conditional_create()
+
+    def read(self, what=None, start=None, end=None, pandas=True):
+        print(what)
+
+        if what is None:
+            what = "*"
+        else:
+            what = [what] if isinstance(what, str) else what
+            what = ",".join(["timestamp"]+what)
+        sql = f"SELECT {what} FROM {self.location}"
+
+        with sqlite3.connect(self.db) as self.connection:
+            if pandas:
+                r = pd.read_sql_query(sql, self.connection)
+            else:
+                self.cursor = self.connection.cursor()
+                r = self.cursor.execute(sql).fetchall()
+        return r
+
+    def _conditional_create(self):
+        with sqlite3.connect(self.db) as self.connection:
+            self.cursor = self.connection.cursor()
+            self.cursor.execute(
+                f"CREATE TABLE IF NOT EXISTS {self.location} (timestamp text, {','.join([x + ' float' for x in self._keys])});")
+            self.connection.commit()
+
+    def write(self,timestamp, data):
+        with sqlite3.connect(self.db) as self.connection:
+            self.cursor = self.connection.cursor()
+            timestamp = f"\"{timestamp}\""
+            sql = f"INSERT INTO {self.location} ({','.join(['timestamp'] + self._keys)}) VALUES( {','.join([timestamp] + [str(data[x]) for x in self._keys])});"
+            self.cursor.execute(sql)
+            print(".")
+            self.connection.commit()
+
+    def connection(self):
+        return sqlite3.connect(self.db)
+
+class SensorList:
+    def __init__(self, sensors):
+        self.sensors = sensors
+        self._keys = sorted(list(set(sum([x.measure for x in self.sensors], []))))
+        self._separator = "\t"
+
+
+    def all(self):
+        results = [s.get() for s in self.sensors]
+        d = {k:[] for k in self._keys}
+        for k in self._keys:
+            for r in results:
+                if k in r :
+                    d[k].append(r[k])
+        d = {k: sum(v)/len(v) for k,v in d.items()}
+        return d
+
+
+
+class SensorsSystem:
+    def __init__(self, sl,  interval=60, location=None):
+        self.sl = sl if isinstance(sl, SensorList) else SensorList(sl)
+        self.store = Store(keys=self.sl._keys, location=location)
+        self.interval = interval
+
+    def all(self):
+        return self.sl.all()
+
+    def log(self):
+        self.store.write(timestamp(), self.sl.all())
+
+    def run(self):
+        def _run():
+            while True:
+                self.log()
+                time.sleep(self.interval)
+
+        daemonLoop = multiprocessing.Process(name='Daemon', target=_run)
+        daemonLoop.start()
+
+    def read(self, what=None, start=None, end=None):
+        self.store.read(what=what, start=start, end=end)
