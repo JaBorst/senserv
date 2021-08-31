@@ -49,19 +49,18 @@ def timestamp():
     return datetime.now().isoformat()
 
 class Store():
-    def __init__(self, keys, db=None, location=None, permanent=True):
-
+    def __init__(self, keys, db=None, location=None):
+        print("input location", location)
         self._keys = keys
         if db is None:
             self.db=pathlib.Path("senserv_db.sqlite")
         else:
             self.db = pathlib.Path(db)
 
-        if location is None:
-            self.location = "current_location"
-        else:
-            self.location = location
-        self._conditional_create()
+        self.location = location
+        if not (location is None):
+            if location.get() != "":
+                self._conditional_create()
 
     def read(self, what=None, start=None, end=None, pandas=True):
         print(what)
@@ -71,7 +70,7 @@ class Store():
         else:
             what = [what] if isinstance(what, str) else what
             what = ",".join(["timestamp"]+what)
-        sql = f"SELECT {what} FROM {self.location}"
+        sql = f"SELECT {what} FROM {self.location.get()}"
 
         with sqlite3.connect(self.db) as self.connection:
             if pandas:
@@ -82,23 +81,31 @@ class Store():
         return r
 
     def _conditional_create(self):
+        print("Creating")
         with sqlite3.connect(self.db) as self.connection:
             self.cursor = self.connection.cursor()
             self.cursor.execute(
-                f"CREATE TABLE IF NOT EXISTS {self.location} (timestamp text, {','.join([x + ' float' for x in self._keys])});")
+                f"CREATE TABLE IF NOT EXISTS {self.location.get()} (timestamp text, {','.join([x + ' float' for x in self._keys])});")
             self.connection.commit()
 
     def write(self,timestamp, data):
         with sqlite3.connect(self.db) as self.connection:
             self.cursor = self.connection.cursor()
             timestamp = f"\"{timestamp}\""
-            sql = f"INSERT INTO {self.location} ({','.join(['timestamp'] + self._keys)}) VALUES( {','.join([timestamp] + [str(data[x]) for x in self._keys])});"
+            sql = f"INSERT INTO {self.location.get()} ({','.join(['timestamp'] + self._keys)}) VALUES( {','.join([timestamp] + [str(data[x]) for x in self._keys])});"
             self.cursor.execute(sql)
             print(".")
             self.connection.commit()
 
     def connection(self):
         return sqlite3.connect(self.db)
+
+    def tables(self):
+        with sqlite3.connect(self.db) as self.connection:
+            self.cursor = self.connection.cursor()
+            r = self.cursor.execute("select name from sqlite_master where type = 'table';").fetchall()
+            print(r)
+        return r
 
 class SensorList:
     def __init__(self, sensors):
@@ -137,8 +144,17 @@ class SensorsSystem:
                 self.log()
                 time.sleep(self.interval)
 
-        daemonLoop = multiprocessing.Process(name='Daemon', target=_run)
-        daemonLoop.start()
+        self.daemonLoop = multiprocessing.Process(name='Daemon', target=_run)
+        self.daemonLoop.start()
+
+    def stop(self):
+        self.daemonLoop.terminate()
 
     def read(self, what=None, start=None, end=None):
         self.store.read(what=what, start=start, end=end)
+
+    def change_location(self, location):
+        self.stop()
+        self.location = location
+        self.store = Store(keys=self.sl._keys, location=location)
+        self.run()
